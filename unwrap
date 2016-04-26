@@ -1,0 +1,75 @@
+#!/usr/bin/python
+###########
+# unwrap
+# decodes obfuscated PHP.
+###########
+
+import re
+import shlex
+import zlib
+
+from optparse import OptionParser
+from string import letters
+
+parser = OptionParser()
+(options, args) = parser.parse_args()
+
+def str_rot13(s):
+    buffer = []
+    for c in s:
+        if c in letters:
+            c = c.encode('rot13')
+        buffer.append(c)
+    return ''.join(buffer)
+
+variables = {}
+
+decode_methods = {
+    'eval' : lambda x: x,
+    'stripslashes' : lambda x: x,
+    'gzinflate' : lambda x: zlib.decompress(x, -zlib.MAX_WBITS),
+    'gzuncompress' : lambda x: zlib.decompress(x),
+    'base64_decode' : lambda x: x.decode('base64'),
+    'str_rot13' : str_rot13
+}
+
+def process_stack(stack):
+    current = None
+    for token in reversed(stack):
+        if token in "()":
+            continue
+        if token[0] in "\"'":
+            token = token[1:-1]
+        if not current:
+            current = token
+        elif token not in decode_methods:
+            return None
+        if token in decode_methods:
+            current = decode_methods[token](current)
+    return current
+
+def process_data(data):
+    stack = []
+    lexer = shlex.shlex(data)
+    for token in lexer:
+        stack.append(token)
+    return process_stack(stack) or data
+
+if len(args) >= 1:
+    for f in args:
+        ifile = open(f, 'r')
+        data = ifile.read()
+        for d in re.finditer(r"<\?(?:php)?(.*?)\?>", data, re.DOTALL):
+            for statement in d.group(1).split(';'):
+                result1 = statement.strip('\r\n\t ')
+                if not result1:
+                    continue
+                    
+                print "Original Data:\n", result1, '\n'
+                while result1:
+                    result2 = process_data(result1)
+                    if result2 and result2 != result1:
+                        result1 = result2
+                    else:
+                        break
+                print "Decoded Data:\n", result1, '\n'
